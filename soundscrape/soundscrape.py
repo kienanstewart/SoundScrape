@@ -67,6 +67,8 @@ def main():
                         help='Only fetch tracks with a Downloadable link.')
     parser.add_argument('-t', '--track', type=str, default='',
                         help='The name of a specific track by an artist')
+    parser.add_argument('--album-folders', action='store_true', dest='album_folders',
+                        help='Organize saved songs in folders by artist and album')
     parser.add_argument('-f', '--folders', action='store_true',
                         help='Organize saved songs in folders by artists')
     parser.add_argument('-p', '--path', type=str, default='',
@@ -133,6 +135,7 @@ def process_soundcloud(vargs):
     track_permalink = vargs['track']
     keep_previews = vargs['keep']
     folders = vargs['folders']
+    album_folders = vargs['album_folders']
 
     id3_extras = {}
     one_track = False
@@ -208,6 +211,11 @@ def process_soundcloud(vargs):
             if not exists(name_path):
                 mkdir(name_path)
             filename = join(name_path, filename)
+        elif album_folders:
+            name_path = join(vargs['path'], track_data['artist'], track_data['album'])
+            if not exists(name_path):
+                mkdir(name_path)
+            filename = join(name_path, filename)
         else:
             filename = join(vargs['path'], filename)
 
@@ -252,7 +260,7 @@ def process_soundcloud(vargs):
                     tracks = tracks[:num_tracks]
                     aggressive = True
                     for track in tracks:
-                        download_track(track, resolved.title, keep_previews, folders, custom_path=vargs['path'])
+                        download_track(track, resolved.title, keep_previews, folders,  custom_path=vargs['path'], album_folders=album_folders)
 
             elif resolved.kind == 'track':
                 tracks = [resolved]
@@ -280,18 +288,18 @@ def process_soundcloud(vargs):
                             track['playlist']['tracks'] = track['playlist']['tracks'][:num_tracks]
                             for playlist_track in track['playlist']['tracks']:
                                 album_name = track['playlist']['title']
-                                filename = download_track(playlist_track, album_name, keep_previews, folders, filenames, custom_path=vargs['path'])
+                                filename = download_track(playlist_track, album_name, keep_previews, folders, filenames, custom_path=vargs['path'], album_folders=album_folders)
                                 if filename:
                                     filenames.append(filename)
                         else:
                             d_track = track['track']
-                            filename = download_track(d_track, custom_path=vargs['path'])
+                            filename = download_track(d_track, custom_path=vargs['path'], album_folders=album_folders)
                             if filename:
                                 filenames.append(filename)
 
         if not aggressive:
             filenames = download_tracks(client, tracks, num_tracks, vargs['downloadable'], vargs['folders'], vargs['path'],
-                                        id3_extras=id3_extras)
+                                        id3_extras=id3_extras, album_folders=album_folders)
 
     if vargs['open']:
         open_files(filenames)
@@ -304,7 +312,7 @@ def get_client():
     client = soundcloud.Client(client_id=CLIENT_ID)
     return client
 
-def download_track(track, album_name=u'', keep_previews=False, folders=False, filenames=[], custom_path=''):
+def download_track(track, album_name=u'', keep_previews=False, folders=False, filenames=[], custom_path='', album_folders=False):
     """
     Given a track, force scrape it.
     """
@@ -329,6 +337,11 @@ def download_track(track, album_name=u'', keep_previews=False, folders=False, fi
 
     if folders:
         name_path = join(custom_path, name)
+        if not exists(name_path):
+            mkdir(name_path)
+        filename = join(name_path, filename)
+    elif album_folders:
+        name_path = join(custom_path, name, album_name)
         if not exists(name_path):
             mkdir(name_path)
         filename = join(name_path, filename)
@@ -365,7 +378,7 @@ def download_track(track, album_name=u'', keep_previews=False, folders=False, fi
 
     return filename
 
-def download_tracks(client, tracks, num_tracks=sys.maxsize, downloadable=False, folders=False, custom_path='', id3_extras={}):
+def download_tracks(client, tracks, num_tracks=sys.maxsize, downloadable=False, folders=False, custom_path='', id3_extras={}, album_folders=False):
     """
     Given a list of tracks, iteratively download all of them.
 
@@ -422,6 +435,11 @@ def download_tracks(client, tracks, num_tracks=sys.maxsize, downloadable=False, 
 
                 if folders:
                     track_artist_path = join(custom_path, track_artist)
+                    if not exists(track_artist_path):
+                        mkdir(track_artist_path)
+                    track_filename = join(track_artist_path, track_filename)
+                elif album_folder:
+                    track_artist_path = join(custom_path, track_artist, track_album)
                     if not exists(track_artist_path):
                         mkdir(track_artist_path)
                     track_filename = join(track_artist_path, track_filename)
@@ -545,7 +563,7 @@ def process_bandcamp(vargs):
     else:
         bc_url = 'https://' + artist_url + '.bandcamp.com/music'
 
-    filenames = scrape_bandcamp_url(bc_url, num_tracks=vargs['num_tracks'], folders=vargs['folders'], custom_path=vargs['path'])
+    filenames = scrape_bandcamp_url(bc_url, num_tracks=vargs['num_tracks'], folders=vargs['folders'], custom_path=vargs['path'], album_folders=vargs['album_folders'])
 
     # check if we have lists inside a list, which indicates the
     # scraping has gone recursive, so we must format the output
@@ -565,7 +583,7 @@ def process_bandcamp(vargs):
 
 
 # Largely borrowed from Ronier's bandcampscrape
-def scrape_bandcamp_url(url, num_tracks=sys.maxsize, folders=False, custom_path=''):
+def scrape_bandcamp_url(url, num_tracks=sys.maxsize, folders=False, custom_path='', album_folders=False):
     """
     Pull out artist and track info from a Bandcamp URL.
 
@@ -595,6 +613,16 @@ def scrape_bandcamp_url(url, num_tracks=sys.maxsize, folders=False, custom_path=
         directory = join(custom_path, directory)
         if not exists(directory):
             mkdir(directory)
+    elif album_folders:
+        if album_name:
+            directory = join(
+                sanitize_filename(artist),
+                sanitize_filename(album_name))
+        else:
+            directory = sanitize_filename(artist)
+        directory = join(custom_path, directory)
+        if not exists(directory):
+            os.makedirs(directory)
 
     for i, track in enumerate(album_data["trackinfo"]):
 
@@ -607,13 +635,13 @@ def scrape_bandcamp_url(url, num_tracks=sys.maxsize, folders=False, custom_path=
                 track_number = str(track["track_num"]).zfill(2)
             else:
                 track_number = None
-            if track_number and folders:
+            if track_number and (folders or album_folders):
                 track_filename = '%s - %s.mp3' % (track_number, track_name)
             else:
                 track_filename = '%s.mp3' % (track_name)
             track_filename = sanitize_filename(track_filename)
 
-            if folders:
+            if folders or album_folders:
                 path = join(directory, track_filename)
             else:
                 path = join(custom_path, sanitize_filename(artist) + ' - ' + track_filename)
